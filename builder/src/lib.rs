@@ -1,4 +1,4 @@
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Fields, FieldsNamed};
 
@@ -11,6 +11,8 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let builder_fields = builder_fields_token(&ast.data);
     let init_builder_fields = init_builder_fields_token(&ast.data);
     let setters = setters_token(&ast.data);
+    let (build_error_ident, build_error) = build_error_token(target_name);
+    let build_method = build_method_token(&ast.data, target_name, &build_error_ident);
 
     let tokens = quote! {
         impl #target_name {
@@ -26,8 +28,11 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
 
         impl #builder_name {
+            #build_method
             #setters
         }
+
+        #build_error
     };
 
     tokens.into()
@@ -91,4 +96,46 @@ fn setters_token(data: &Data) -> TokenStream {
     quote! {
         #(#setters)*
     }
+}
+
+/// build メソッドのトークンを生成する
+fn build_method_token(data: &Data, target_name: &Ident, error_type: &Ident) -> TokenStream {
+    let fields = fields_token(data).named.iter().map(|field| {
+        let ident = &field.ident;
+        quote! {
+            #ident: self.#ident.ok_or_else(|| #error_type::FieldRequired("#ident".to_owned()))?
+        }
+    });
+
+    quote! {
+        pub fn build(self) -> Result<#target_name, #error_type> {
+            let target = #target_name {
+                #(#fields),*
+            };
+            Ok(target)
+        }
+    }
+}
+
+fn build_error_token(target_name: &Ident) -> (Ident, TokenStream) {
+    let ident = format_ident!("{}BuildError", target_name);
+
+    let implementation = quote! {
+        #[derive(Debug)]
+        pub enum #ident {
+            FieldRequired(String),
+        }
+
+        impl std::fmt::Display for #ident {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    #ident::FieldRequired(name) => write!(f, "{} field is required", name),
+                }
+            }
+        }
+
+        impl std::error::Error for #ident {}
+    };
+
+    (ident, implementation)
 }
