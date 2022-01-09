@@ -23,6 +23,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
+        #[derive(std::fmt::Debug, std::clone::Clone)]
         pub struct #builder_name {
             #builder_fields
         }
@@ -103,12 +104,16 @@ fn build_method_token(data: &Data, target_name: &Ident, error_type: &Ident) -> T
     let fields = fields_token(data).named.iter().map(|field| {
         let ident = &field.ident;
         quote! {
-            #ident: self.#ident.ok_or_else(|| #error_type::FieldRequired("#ident".to_owned()))?
+            #ident: cloned.#ident.ok_or_else(|| #error_type::FieldRequired("#ident".to_owned()))?
         }
     });
 
+    // 本当は build(self) にしたかったけど、 setter の戻り値が &mut Self なのでできなかった。
+    // setter のレシーバーや戻り値の調整も考えたけどメソッドチェーンのパターンと別の文で呼び出すパターンを両立させることができず諦めた。
+    // いい方法があれば知りたい。
     quote! {
-        pub fn build(self) -> Result<#target_name, #error_type> {
+        pub fn build(&self) -> Result<#target_name, #error_type> {
+            let cloned = self.clone();
             let target = #target_name {
                 #(#fields),*
             };
